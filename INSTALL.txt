@@ -1,3 +1,7 @@
+Setup:
+https://github.com/GreatTaku/Discord-Bot-Examples/blob/master/README.rst
+
+
 Requirements:
 
 pip3 install --user discord.py tinydb timeloop

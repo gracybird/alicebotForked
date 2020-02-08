@@ -6,6 +6,7 @@ import inspect
 from tinydb import TinyDB, Query
 from timeloop import Timeloop
 from datetime import timedelta
+import time
 import abconfig
 
 bot = commands.Bot(command_prefix=abconfig.prefix)
@@ -33,7 +34,6 @@ def db_get(server_id, user_id, table, key):
         answer = res[0][key]
     else:
         answer = None
-
     return answer
 
 def db_set(server_id, user_id, table, key, value):
@@ -62,8 +62,19 @@ async def invite(ctx):
     create a 24hour invite
     '''
     u = ctx.author
-    link = await discord.TextChannel.create_invite(ctx.message.channel, max_age=30, max_users=1)
-    await u.send('User '+u.display_name+' ('+str(u.id)+') Here is an invite '+link.url)
+    mintime = 60
+    last = db_get(ctx.guild.id, u.id, "invite", "last")
+    now = int(time.time())
+    if not last or last == 0 or (now - last) > mintime:
+        link = await discord.TextChannel.create_invite(ctx.message.channel, max_age=30, max_users=1)
+        await u.send('Here is an invite '+link.url)
+        await ctx.send('Invite sent to '+u.display_name)
+        db_set(ctx.guild.id, u.id, "invite", "last", now)
+    else:
+        delta = now - last
+        remain = mintime - delta
+        dd = timedelta(seconds=remain)
+        await ctx.send('Sorry '+u.display_name+', you have issued an invite too recently, please wait another '+str(dd))
 
 @bot.command()
 async def config(ctx, *args):
