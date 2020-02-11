@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 
-import discord
-from discord.ext import commands
-import inspect
-from tinydb import TinyDB, Query
-from timeloop import Timeloop
+import os
 from datetime import timedelta
 import time
+import discord
+from discord.ext import commands
+from tinydb import TinyDB, Query
+from timeloop import Timeloop
 import abconfig
 
 known_config = ( 'invite_cooldown', 'invite_timespan' )
@@ -14,6 +14,20 @@ bot = commands.Bot(command_prefix=abconfig.prefix)
 db = dict()
 botconfig = dict()
 tl = Timeloop()
+
+logpath = os.path.dirname(os.path.realpath(__file__))
+
+def log(guild, channel, text):
+    path = logpath + '/alicebot.log'
+    if not guild:
+        gid = '-'
+    else:
+        gid = str(guild.id)
+    if not channel:
+        channel = '-'
+    when = time.strftime('%b %d %Y %H:%M:%S')
+    with open(path, 'a') as f:
+        f.write("{} {} {} {}\n".format(when, gid, channel, text))
 
 def config_load(server_id):
     tab = db[server_id].table('config')
@@ -86,6 +100,7 @@ async def invite(ctx):
         await u.send('Here is an invite '+link.url)
         await ctx.send('Invite sent to '+u.display_name)
         db_set(ctx.guild.id, u.id, "invite", "last", now)
+        log(ctx.guild, ctx.channel, "User {}[{}] created an invite".format(ctx.author.display_name, ctx.author.id))
     else:
         delta = now - last
         remain = mintime - delta
@@ -134,6 +149,7 @@ async def config(ctx, *args):
             config_set(ctx.guild.id, args[1], args[2])
             botconfig[ ctx.guild.id ] = config_load(ctx.guild.id)
             text = "Set config %s = %s" % (args[1], args[2])
+            log(ctx.guild, ctx.channel, "User {}[{}] just set config {}={}".format(ctx.author.display_name, ctx.author.id, args[1], args[2]))
     else:
         text = "Unrecognised operation " + args[0]
     await ctx.send(text)
@@ -146,21 +162,33 @@ async def on_ready():
     open up a db for each one
     """
     global botconfig
-    print("Bot ready")
+    log(None, None, "Bot ready")
     for guild in bot.guilds:
-        print('guild: ' + guild.name + ' (' + str(guild.id) + ')')
+        log(None, None, 'guild: ' + guild.name + ' (' + str(guild.id) + ')')
         dbpath = abconfig.db_prefix + str(guild.id) + '.json'
-        print(' - Opening DB: ' + dbpath)
         db[ guild.id ] = TinyDB(dbpath)
         botconfig[ guild.id ] = config_load(guild.id)
-
     
 @bot.event
 async def on_connect():
     """
     connected to discord, but not necessarily ready to run yet
     """
-    print("Bot connected")
+    log(None, None, "Bot connected")
+
+@bot.event
+async def on_guild_join(guild):
+    """
+    We just joined a server
+    """
+    log(guild, None, "Joined server " + guild.name)
+
+@bot.event
+async def on_guild_remove(guild):
+    """
+    We just left a server
+    """
+    log(guild, None, "Left server " + guild.name)
 
 @bot.event
 async def on_message(msg):
