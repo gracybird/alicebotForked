@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 
 import os
-from datetime import timedelta
 import time
+import math
 import discord
 from discord.ext import commands
 from tinydb import TinyDB, Query
@@ -16,6 +16,24 @@ botconfig = dict()
 tl = Timeloop()
 
 logpath = os.path.dirname(os.path.realpath(__file__))
+
+def timestr(secs):
+    if secs > 57600:
+        days = math.floor(secs / 57600)
+        secs = secs - 57600 * days
+        hours = math.floor( secs / 3600 )
+        return "{}d {}h".format(days, hours)
+    elif secs > 3600:
+        hours = math.floor( secs / 3600 )
+        secs = secs - 3600 * hours
+        mins = math.floor( secs / 60 )
+        return "{}h {}m".format(hours, mins)
+    elif secs > 60:
+        mins = math.floor( secs / 60 )
+        secs = secs - 60 * mins
+        return "{}m {}s".format(mins, secs)
+    else:
+        return "{}s".format(secs)
 
 def log(guild, channel, text):
     path = logpath + '/alicebot.log'
@@ -96,16 +114,16 @@ async def invite(ctx):
     last = db_get(ctx.guild.id, u.id, "invite", "last")
     now = int(time.time())
     if not last or last == 0 or (now - last) > mintime:
-        link = await discord.TextChannel.create_invite(ctx.message.channel, max_age=30, max_users=1)
-        await u.send('Here is an invite '+link.url)
+        link = await discord.TextChannel.create_invite(ctx.message.channel, max_age=timespan, max_users=1)
+        dur = timestr(timespan)
+        await u.send('Here is an invite valid for {} {}'.format(dur, link.url))
         await ctx.send('Invite sent to '+u.display_name)
         db_set(ctx.guild.id, u.id, "invite", "last", now)
-        log(ctx.guild, ctx.channel, "User {}[{}] created an invite".format(ctx.author.display_name, ctx.author.id))
+        log(ctx.guild, ctx.channel, "{}[{}] created an {} invite".format(ctx.author.display_name, ctx.author.id, dur))
     else:
         delta = now - last
-        remain = mintime - delta
-        dd = timedelta(seconds=remain)
-        await ctx.send('Sorry '+u.display_name+', you have issued an invite too recently, please wait another '+str(dd))
+        remain = int(mintime - delta)
+        await ctx.send('Sorry '+u.display_name+', you have issued an invite too recently, please wait another '+timestr(remain))
 
 @bot.command()
 async def config(ctx, *args):
