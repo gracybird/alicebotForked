@@ -9,6 +9,7 @@ from datetime import timedelta
 import time
 import abconfig
 
+known_config = ( 'invite_cooldown', 'invite_timespan' )
 bot = commands.Bot(command_prefix=abconfig.prefix)
 db = dict()
 botconfig = dict()
@@ -25,6 +26,11 @@ def config_set(server_id, key, value):
     tab = db[server_id].table('config')
     query = Query()
     tab.upsert({'key': key, 'value': value}, query.key == key)
+
+def config_get(server_id, key):
+    if not key in botconfig[server_id]:
+        return None
+    return botconfig[server_id][key]
 
 def db_get(server_id, user_id, table, key):
     tab = db[server_id].table(table)
@@ -62,7 +68,17 @@ async def invite(ctx):
     create a 24hour invite
     '''
     u = ctx.author
-    mintime = 60
+    mintime = config_get(ctx.guild.id, 'invite_cooldown')
+    if not mintime:
+        mintime = 3600
+    else:
+        mintime = int(mintime)
+
+    timespan = config_get(ctx.guild.id, 'invite_timespan')
+    if not timespan:
+        timespan = 3600
+    timespan = int(timespan)
+
     last = db_get(ctx.guild.id, u.id, "invite", "last")
     now = int(time.time())
     if not last or last == 0 or (now - last) > mintime:
@@ -82,14 +98,24 @@ async def config(ctx, *args):
     Configuration commands
     '''
     global botconfig
+    # tis command is admins only
+    if not ctx.author.permissions_in(ctx.channel).administrator:
+        return
+
     gid = ctx.guild.id
     if not args or args[0] == 'list':
         text = "AliceBot config values :-\n"
         if not gid in botconfig:
             text = text + "none set"
         else:
-            for i in botconfig[gid].items():
-                text = text + "* " + str(i[0]) + " = '" + str(i[1]) + "'\n"
+            for key in known_config:
+                text = text + "* " + key + " = "
+                if not key in botconfig[gid]:
+                    text = text + "_Not set_\n"
+                else:
+                    text = text + "'" + botconfig[gid][key] + "'\n"
+    elif args[0] == "help":
+        text = "config set {key} {value}\nconfig get {key}\nConfiguration values available:\n" + ", ".join(known_config)
     elif args[0] == 'get':
         if not args[1]:
             text = 'Usage: config get {value}'
@@ -102,6 +128,8 @@ async def config(ctx, *args):
     elif args[0] == 'set':
         if not args[1] or not args[2]:
             text = "Usage: config set key value"
+        elif not args[1] in known_config:
+            text = "Unown config setting %s" % (args[1])
         else:
             config_set(ctx.guild.id, args[1], args[2])
             botconfig[ ctx.guild.id ] = config_load(ctx.guild.id)
