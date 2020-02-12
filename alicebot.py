@@ -271,7 +271,7 @@ async def access(ctx, *args):
             else:
                 config_set(ctx.guild, 'access', cmd.name, role.id)
                 text = "Restricting {} command to @{} [id:{}]".format(cmd.name, role.name, role.id)
-                log(ctx.guild, ctx.channel, "User {}[{}] restricted {} to {}[{]}".format(ctx.author.display_name, ctx.author.id, cmd.name, role.name, role.id))
+                log(ctx.guild, ctx.channel, "User {}[{}] restricted {} to {}[{}]".format(ctx.author.display_name, ctx.author.id, cmd.name, role.name, role.id))
     elif args[0] == 'unset':
         cmd = None
         for c in bot.commands:
