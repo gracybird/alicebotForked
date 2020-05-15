@@ -65,6 +65,7 @@ def config_load(guild):
     botconfig[guild.id] = dict()
     botconfig[guild.id]['config'] = config_read(guild, 'config')
     botconfig[guild.id]['access'] = config_read(guild, 'access')
+    botconfig[guild.id]['dict'] = config_read(guild, 'dict')
 
 def config_set(guild, section, key, value):
     """
@@ -73,7 +74,10 @@ def config_set(guild, section, key, value):
     global botconfig
     tab = db[guild.id].table(section)
     query = Query()
-    tab.upsert({'key': key, 'value': value}, query.key == key)
+    if not value:
+        tab.remove(query.key == key)
+    else:
+        tab.upsert({'key': key, 'value': value}, query.key == key)
     botconfig[guild.id][section] = config_read(guild, section)
 
 def config_get(guild, section, key):
@@ -130,6 +134,65 @@ def perm_check(ctx, need):
 
     log(ctx.guild, ctx.channel, "perm_check({},{}) = {}".format(ctx.invoked_with, need, reason))
     return answer
+
+@bot.command()
+async def define(ctx, *args):
+    '''
+    Define a word
+    '''
+    if not perm_check(ctx, None):
+        return
+
+    response = None
+    if not args or args[0] == 'help':
+        response = 'Usage: .define word Text of definition....'
+    else:
+        keyword = args[0].lower()
+        rest = args[1:]
+        u = ctx.author
+        c = config_get(ctx.guild, 'dict', keyword)
+
+        if not rest:
+            if not c:
+                response = 'No dictionary entry for "' + keyword + '"'
+            else:
+                response = "Removed definition of '"+keyword+"'"
+                config_set(ctx.guild, 'dict', keyword, None)
+        else:
+            text = " ".join(rest)
+            config_set(ctx.guild, 'dict', keyword, text)
+            response = "Defined '"+keyword+"' as '"+text+"'"
+
+    if response:
+        await ctx.send(response)
+
+@bot.command()
+async def d(ctx, *args):
+    '''
+    Print a word definition
+    '''
+    if not perm_check(ctx, None):
+        return
+
+    response = None
+    if not args or args[0] == 'help':
+        response = 'Usage: '+abconfig.prefix+'d word\nPrints the definitionof the given word.'
+    elif args[0] == 'list':
+        response = "Known dictionary words: "
+        whole = config_read(ctx.guild, 'dict')
+        response += ", ".join(whole.keys())
+    else:
+        keyword = args[0].lower()
+        u = ctx.author
+        c = config_get(ctx.guild, 'dict', keyword)
+
+        if not c:
+            response = 'No dictionary entry for "' + keyword + '"'
+        else:
+            response = keyword + " -> " + c
+
+    if response:
+        await ctx.send(response)
 
 @bot.command()
 async def ping(ctx):
