@@ -297,7 +297,10 @@ async def access(ctx, *args):
         return
 
     if not args or args[0] == 'list':
-        text = "Command access permissions :-\n"
+        text = "Usage: access list                  - list all commands\n"
+        text += "       access set {command} {role}  - restrict usage of command\n"
+        text += "       access unset {command}       - remove restriction\n"
+        text += "Command access permissions :-\n"
         for cmd in bot.commands:
             text = text + " * {} - ".format(cmd.name)
             val = config_get(ctx.guild, 'access', cmd.name)
