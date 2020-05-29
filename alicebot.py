@@ -17,8 +17,7 @@ known_config = ( ('invite_cooldown', 'interval'),
                  ('autokick_hasrole', 'role'),
                  ('autokick_timelimit', 'interval'),
                  ('autokick_reason', 'string'),
-                 ('autokick_reason', 'string'),
-                 ('log_channel', 'channel')
+                 ('log_channel', 'channel'),
                )
 
 bot = commands.Bot(command_prefix=abconfig.prefix)
