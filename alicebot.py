@@ -18,7 +18,7 @@ known_config = ( ('invite_cooldown', 'interval'),
                  ('autokick_timelimit', 'interval'),
                  ('autokick_reason', 'string'),
                  ('autokick_reason', 'string'),
-                 ('log_channel', 'channel'),
+                 ('log_channel', 'channel')
                )
 
 bot = commands.Bot(command_prefix=abconfig.prefix)
@@ -460,7 +460,7 @@ async def periodic():
                 if has_role(member, wantrole):
                     onfor = today - member.joined_at
                     if onfor > timeout:
-                        logtext += " - %s expired by %s\n" % ( member.display_name, str(timeout - onfor))
+                        logtext += " - %s expired by %s\n" % ( member.display_name, str(onfor - timeout))
                         if reason:
                             await guild.kick(member, reason=reason)
                         else:
