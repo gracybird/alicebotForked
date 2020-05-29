@@ -3,13 +3,24 @@
 import os
 import time
 import math
+import re
 import discord
-from discord.ext import commands
+from discord.ext import tasks, commands
 from tinydb import TinyDB, Query
 from timeloop import Timeloop
+from datetime import timedelta
+from datetime import datetime
 import abconfig
 
-known_config = ( 'invite_cooldown', 'invite_timespan' )
+known_config = ( ('invite_cooldown', 'interval'),
+                 ('invite_timespan', 'interval'),
+                 ('autokick_hasrole', 'role'),
+                 ('autokick_timelimit', 'interval'),
+                 ('autokick_reason', 'string'),
+                 ('autokick_reason', 'string'),
+                 ('log_channel', 'channel'),
+               )
+
 bot = commands.Bot(command_prefix=abconfig.prefix)
 db = dict()
 botconfig = dict()
@@ -17,7 +28,21 @@ tl = Timeloop()
 
 logpath = os.path.dirname(os.path.realpath(__file__))
 
+def find_config(name):
+    """ look up a name in the known configs """
+    for config in known_config:
+        if config[0] == name:
+            return config
+    return None
+
+def has_role(member, roleid):
+    """ test for role id in members role list """
+    if any(r.id == roleid for r in member.roles):
+        return True
+    return False
+
 def timestr(secs):
+    """ print number of seconds as a human readable value """
     if secs > 57600:
         days = math.floor(secs / 57600)
         secs = secs - 57600 * days
@@ -35,7 +60,18 @@ def timestr(secs):
     else:
         return "{}s".format(secs)
 
+regex = re.compile(r'^((?P<days>[\.\d]+?)d)?((?P<hours>[\.\d]+?)h)?((?P<minutes>[\.\d]+?)m)?((?P<seconds>[\.\d]+?)s)?$')
+
+def parse_interval(time_str):
+    """ parse human readable interval into a timedelta """
+    parts = regex.match(time_str)
+    if parts is None:
+        return None
+    time_params = {name: float(param) for name, param in parts.groupdict().items() if param}
+    return timedelta(**time_params)
+
 def log(guild, channel, text):
+    """ write an entry to the logfile """
     path = logpath + '/alicebot.log'
     if not guild:
         gid = '-'
@@ -80,7 +116,7 @@ def config_set(guild, section, key, value):
         tab.upsert({'key': key, 'value': value}, query.key == key)
     botconfig[guild.id][section] = config_read(guild, section)
 
-def config_get(guild, section, key):
+def config_get(guild, section, key, type='string'):
     """
     fetch a single config value
     """
@@ -91,9 +127,17 @@ def config_get(guild, section, key):
         return None
     if not key in botconfig[guild.id][section]:
         return None
-    return botconfig[guild.id][section][key]
+    answer = botconfig[guild.id][section][key]
+    if type == 'interval':
+        answer = parse_interval(answer)
+    elif type == 'role':
+        answer = guild.get_role(answer)
+    elif type == 'channel':
+        answer = guild.get_channel(answer)
+    return answer
 
 def db_get(guild, user, table, key):
+    """ lookup a config value for this guild """
     tab = db[guild.id].table(table)
     query = Query()
     res = tab.search((query.uid == user.id))
@@ -128,7 +172,7 @@ def perm_check(ctx, need):
         reason = "Admin"
 
     # you have the corresponding role
-    elif any(r.id == need for r in ctx.author.roles):
+    elif has_role(ctx.author, need):
         answer = True
         reason = "Match"
 
@@ -220,16 +264,17 @@ async def invite(ctx):
     if not perm_check(ctx, 676891619773120589):
         return
     u = ctx.author
-    mintime = config_get(ctx.guild, 'config', 'invite_cooldown')
+    mintime = config_get(ctx.guild, 'config', 'invite_cooldown', 'interval')
     if not mintime:
         mintime = 3600
     else:
-        mintime = int(mintime)
+        mintime = mintime.total_seconds()
 
-    timespan = config_get(ctx.guild, 'config',  'invite_timespan')
+    timespan = config_get(ctx.guild, 'config',  'invite_timespan', 'interval')
     if not timespan:
         timespan = 3600
-    timespan = int(timespan)
+    else:
+        timespan = timespan.total_seconds()
 
     last = db_get(ctx.guild, u, "invite", "last")
     now = int(time.time())
@@ -257,33 +302,78 @@ async def config(ctx, *args):
     if not args or args[0] == 'list':
         text = "AliceBot config values :-\n"
         for key in known_config:
-            text = text + "* " + key + " = "
-            val = config_get(ctx.guild, 'config', key)
+            text = text + "* " + key[0] + " = "
+            val = config_get(ctx.guild, 'config', key[0], type=key[1])
             if not val:
                 text = text + "_Not set_\n"
+            elif key[1] == 'role':
+                    text += "'@{}' [{}]\n".format(val.name,val.id)
+            elif key[1] == 'channel':
+                    text += "'#{}' [{}]\n".format(val.name,val.id)
             else:
-                text = text + "'" + val + "'\n"
+                text = text + "'" + str(val) + "'\n"
     elif args[0] == "help":
-        text = "config set {key} {value}\nconfig get {key}\nConfiguration values available:\n" + ", ".join(known_config)
+        text = "config set {key} {value}\nconfig get {key}\nconfig unset {key}\n"
     elif args[0] == 'get':
         if not args[1]:
             text = 'Usage: config get {value}'
         else:
-            key = args[1]
-            val = config_get(ctx.guild, 'config', key)
-            if not val:
-                text = "No config set for '"+key+"'"
+            key = find_config(args[1])
+            if not key:
+                text = "Unknown config value '"+args[1]+"'"
             else:
-                text = "Config {} = {}".format(key,val)
+                val = config_get(ctx.guild, 'config', key[0], type=key[1])
+                if not val:
+                    text = "No config set for '"+key[0]+"'"
+                elif key[1] == 'role':
+                    text = "Config {} = @{} [{}]".format(key[0],val.name,val.id)
+                elif key[1] == 'channel':
+                    text = "Config {} = #{} [{}]".format(key[0],val.name,val.id)
+                else:
+                    text = "Config {} = {}".format(key[0],val)
     elif args[0] == 'set':
         if not args[1] or not args[2]:
             text = "Usage: config set key value"
-        elif not args[1] in known_config:
+        elif not find_config(args[1]):
             text = "Unknown config setting %s" % (args[1])
         else:
-            config_set(ctx.guild, 'config', args[1], args[2])
-            text = "Set config %s = %s" % (args[1], args[2])
-            log(ctx.guild, ctx.channel, "User {}[{}] just set config {}={}".format(ctx.author.display_name, ctx.author.id, args[1], args[2]))
+            key = find_config(args[1])
+            value = args[2]
+            if key[1] == 'role':
+                if ctx.message.role_mentions:
+                    role = ctx.message.role_mentions[0]
+                else:
+                    role = ctx.guild.get_role(int(value))
+                if not role:
+                    text = "Could not find a role matching %s" % (value)
+                else:
+                    config_set(ctx.guild, 'config', key[0], role.id)
+                    text = "Set config %s = %d (%s)" % (key[0], role.id, role.name)
+            elif key[1] == 'channel':
+                if ctx.message.channel_mentions:
+                    channel = ctx.message.channel_mentions[0]
+                else:
+                    channel = ctx.guild.get_channel(int(value))
+                if not channel:
+                    text = "Could not find channel matching %s" % (value)
+                else:
+                    config_set(ctx.guild, 'config', key[0], channel.id)
+                    text = "Set config %s = %d (%s)" % (key[0], channel.id, channel.name)
+
+            else:
+                config_set(ctx.guild, 'config', key[0], value)
+                text = "Set config %s = %s" % (key[0], value)
+            log(ctx.guild, ctx.channel, "User {}[{}] just set config {}={}".format(ctx.author.display_name, ctx.author.id, key[0], value))
+    elif args[0] == 'unset':
+        if not args[1]:
+            text = 'Usage: config unset {key}'
+        else:
+            key = find_config(args[1])
+            if not key:
+                text = "Unknown config value '"+args[1]+"'"
+            else:
+                val = config_set(ctx.guild, 'config', key[0], None)
+                text = "Removed config value for '"+key[0]+"'"
     else:
         text = "Unrecognised operation " + args[0]
     await ctx.send(text)
@@ -354,6 +444,40 @@ async def access(ctx, *args):
 
     await ctx.send(text)
 
+@tasks.loop(hours=1.0)
+async def periodic():
+    log(None, None, "Timed loop")
+    today = datetime.utcnow()
+    for guild in bot.guilds:
+        log(guild, None, 'Guild '+guild.name+' has '+str(len(guild.members))+' members.')
+        wantrole = config_get(guild, 'config', 'autokick_hasrole' )
+        timeout = config_get(guild, 'config', 'autokick_timelimit', type='interval')
+        reason = config_get(guild, 'config', 'autokick_reason')
+        channel = config_get(guild, 'config', 'log_channel', type='channel')
+        logtext = str()
+        if wantrole and timeout:
+            for member in guild.members:
+                if has_role(member, wantrole):
+                    onfor = today - member.joined_at
+                    if onfor > timeout:
+                        logtext += " - %s expired by %s\n" % ( member.display_name, str(timeout - onfor))
+                        if reason:
+                            await guild.kick(member, reason=reason)
+                        else:
+                            #await guild.kick(member)
+                            pass
+        if logtext and channel:
+            if reason:
+                info = "The following users have been autokicked :-\n"
+            else:
+                info = "The following users will be kicked if you set autokick_reason:\n"
+            await channel.send(info + logtext)
+
+@periodic.before_loop
+async def before_periodic():
+#    print("Timed loop setup...")
+    pass
+
 @bot.event
 async def on_ready():
     """
@@ -367,6 +491,8 @@ async def on_ready():
         dbpath = abconfig.db_prefix + str(guild.id) + '.json'
         db[ guild.id ] = TinyDB(dbpath)
         config_load(guild)
+
+    periodic.start()
     
 @bot.event
 async def on_connect():
