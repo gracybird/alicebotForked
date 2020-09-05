@@ -27,6 +27,26 @@ tl = Timeloop()
 
 logpath = os.path.dirname(os.path.realpath(__file__))
 
+def isfloat(a):
+    """ Is the argument a floating point number"""
+    try:
+        float(a)
+        return True
+    except ValueError:
+        pass
+    return False
+
+def isexpression(a):
+    """ does the argument contain a valid expression """
+    if 'x' not in a:
+        return False
+    try:
+        res = eval(a, {'x': 1.0})
+        return True
+    except (SyntaxError, NameError):
+        pass
+    return False
+
 def find_config(name):
     """ look up a name in the known configs """
     for config in known_config:
@@ -101,6 +121,7 @@ def config_load(guild):
     botconfig[guild.id]['config'] = config_read(guild, 'config')
     botconfig[guild.id]['access'] = config_read(guild, 'access')
     botconfig[guild.id]['dict'] = config_read(guild, 'dict')
+    botconfig[guild.id]['convert'] = config_read(guild, 'convert')
 
 def config_set(guild, section, key, value):
     """
@@ -177,6 +198,154 @@ def perm_check(ctx, need):
 
     log(ctx.guild, ctx.channel, "perm_check({},{}) = {}".format(ctx.invoked_with, need, reason))
     return answer
+
+def convert_makekey(unit, subunit):
+    if subunit:
+        return "{}|{}".format(unit,subunit)
+    else:
+        return "{}".format(unit)
+
+def convert_splitkey(key):
+    unit = None
+    sub = None
+    if key:
+        parts = key.split('|')
+        unit = parts[0]
+        if len(parts) > 1:
+            sub = parts[1]
+    return (unit,sub)
+
+@bot.command()
+async def convert(ctx, *args):
+    '''
+    Convert values between units
+    '''
+    if not perm_check(ctx, None):
+        return
+
+    response = None
+    if args and args[0] == 'list':
+        response = "Known conversions:\n"
+        whole = config_read(ctx.guild, 'convert')
+        count = 0
+        if whole:
+            whole = sorted(whole)
+        for c in whole:
+            (unit, sub) = convert_splitkey(c)
+            if count > 0:
+                response += ","
+            response += " {}".format(unit)
+            if sub:
+                response += " [{}]".format(sub)
+            count += 1
+
+    elif not args or args[0] == 'help' or len(args) < 2:
+        response = 'Usage: .convert {value} {unit} [subunit]\n' \
+                   '   or: .convert list\n' \
+                   '\n' \
+                   'e.g.  .convert 30 pmol/l e2\n'
+    elif not isfloat(args[0]):
+        response = "Error: the first argument must be a value"
+    else:
+        value = float(args[0])
+        baseunit = args[1].lower()
+        subunit = None
+        if len(args) > 2:
+            subunit = args[2].lower()
+        key = convert_makekey(baseunit, subunit)
+        item = config_get(ctx.guild, 'convert', key)
+        if not item:
+            response = "Sorry I don't know how to convert from {}".format(baseunit)
+            if subunit:
+                response += " [{}]".format(subunit)
+        else:
+            destunit = item[0]
+            factor = item[1]
+            if isfloat(factor):
+                output = value * float(factor)
+            elif isexpression(factor):
+                output = eval(factor, {'x': value})
+            else:
+                response = "Error in conversion factor '{}'".format(factor)
+            if output:
+                response = "{} {} is {:.2f} {}".format(value, baseunit, output, destunit)
+
+    if response:
+        await ctx.send(response)
+
+@bot.command()
+async def conversion(ctx, *args):
+    '''
+    Define a conversion
+    '''
+    if not perm_check(ctx, None):
+        return
+
+    response = None
+    if len(args)==1 and args[0] == 'list':
+        response = "Known conversions:\n"
+        whole = config_read(ctx.guild, 'convert')
+        for c in whole:
+            item = whole[c]
+            (unit, sub) = convert_splitkey(c)
+            factor = item[1]
+            if sub:
+                response += " * {} [{}]".format(unit, sub)
+            else:
+                response += " * {}".format(unit)
+            if isexpression(factor):
+                response += " = {} -> {}\n".format(factor, item[0])
+            else:
+                response += " = x * {} -> {}\n".format(factor, item[0])
+
+
+    elif args and args[0] == 'remove':
+        if len(args) < 2:
+            response = "Usage: .convert remove {fromunit} [subunit]"
+        else:
+            baseunit = args[1].lower()
+            subunit = None
+            if len(args) > 2:
+                subunit = args[2].lower()
+            key = convert_makekey(baseunit, subunit)
+            response = "conversion for {}".format(baseunit)
+            if subunit:
+                response += " [{}]".format(subunit)
+            if not config_get(ctx.guild, 'convert', key):
+                response += " not found"
+            else:
+                config_set(ctx.guild, 'convert', key, None)
+                response += " deleted"
+
+    elif not args or args[0] == 'help' or len(args) < 3:
+        response = 'Usage: .conversion {fromunit} {factor/formula} {tounit} [subunit]\n' \
+                   '   or: .conversion list\n' \
+                   '   or: .conversion remove {fromunit} [subunit]\n' \
+                   '\n' \
+                   'e.g.  .conversion pmol/l 3.671 pg/ml e2\n' \
+                   '      .conversion celsius "((x-32)*5)/9" fahrenheit'
+    else:
+        baseunit = args[0].lower()
+        factor = args[1]
+        tounit = args[2]
+        subunit = None
+        if len(args) > 3:
+            subunit = args[3].lower()
+
+        if not isfloat(factor) and not isexpression(factor):
+            response = "Factor must be a float or an expression manipulating x.  e.g. '((x-32)*5/9'"
+        else:
+            if subunit:
+                response = "Covert {}[{}] into {} with {}".format(baseunit, subunit, tounit, factor)
+            else:
+                response = "Covert {} into {} with {}".format(baseunit, tounit, factor)
+
+            key = convert_makekey(baseunit, subunit)
+            config_set(ctx.guild, 'convert', key, (tounit, factor, subunit))
+    
+    if response:
+        await ctx.send(response)
+
 
 @bot.command()
 async def define(ctx, *args):
