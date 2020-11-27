@@ -335,10 +335,10 @@ async def conversion(ctx, *args):
         if not isfloat(factor) and not isexpression(factor):
             response = "Factor must be a float or an expression manipulating x.  e.g. '((x-32)*5/9'"
         else:
+            response = "Convert {}".format(baseunit)
             if subunit:
-                response = "Covert {}[{}] into {} with {}".format(baseunit, subunit, tounit, factor)
-            else:
-                response = "Covert {} into {} with {}".format(baseunit, tounit, factor)
+                response += " [{}]".format(subunit)
+            response += " into {} with {}".format(tounit, factor)
 
             key = convert_makekey(baseunit, subunit)
             config_set(ctx.guild, 'convert', key, (tounit, factor, subunit))
