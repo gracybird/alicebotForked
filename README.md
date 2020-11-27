@@ -71,3 +71,7 @@ defferentiate between different substances that share the same units, and
     .convert {value} {unit} [subunit]
 ```
 List all of the known conversions, or convert the given value of the given unit and optional subunit.
+
+## Automated functions
+Once per hour the bot will check the userlist for users that still have the role {autokick_hasrole} and have been on the server for {autokick_timelimit} it will kick them from your server giving the optional reason of {autokick_reason}.  This can be used to timeout new years who joined and were given an auto role by another bot but then failed to pass whatever gating or registration process you have that would have removed that role.
+
