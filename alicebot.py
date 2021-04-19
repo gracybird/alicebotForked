@@ -244,10 +244,13 @@ async def convert(ctx, *args):
                    '   or: .convert list\n' \
                    '\n' \
                    'e.g.  .convert 30 pmol/l e2\n'
-    elif not isfloat(args[0]):
-        response = "Error: the first argument must be a value"
+    elif not isfloat(args[0]) or ':' not in x:
+        response = "Error: the first argument must be a value or time"
     else:
-        value = float(args[0])
+        try:
+          value = float(args[0])
+        except ValueError:
+          pass
         baseunit = args[1].lower()
         subunit = None
         if len(args) > 2:
