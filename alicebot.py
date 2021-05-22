@@ -18,6 +18,7 @@ known_config = ( ('invite_cooldown', 'interval'),
                  ('autokick_timelimit', 'interval'),
                  ('autokick_reason', 'string'),
                  ('log_channel', 'channel'),
+                 ('announce_channel', 'channel'),
                )
 
 bot = commands.Bot(command_prefix=abconfig.prefix)
@@ -43,8 +44,12 @@ def isexpression(a):
     try:
         res = eval(a, {'x': 1.0})
         return True
-    except (SyntaxError, NameError):
-        pass
+    except SyntaxError as err:
+        print("SyntaxError +%d: %s" % (err.offset, err.text))
+    except NameError as err:
+        print("Var not found: %s" % err)
+    #except (SyntaxError, NameError):
+    #    pass
     return False
 
 def find_config(name):
@@ -336,7 +341,7 @@ async def conversion(ctx, *args):
             subunit = args[3].lower()
 
         if not isfloat(factor) and not isexpression(factor):
-            response = "Factor must be a float or an expression manipulating x.  e.g. '((x-32)*5/9'"
+            response = "Factor must be a float or an expression manipulating x.  e.g. '((x-32)*5/9' instead of '%s'" % factor
         else:
             response = "Convert {}".format(baseunit)
             if subunit:
@@ -615,6 +620,21 @@ async def access(ctx, *args):
 
     await ctx.send(text)
 
+@bot.command()
+async def updateusers(ctx, *args):
+    '''
+    Forced Update of the user info db
+    '''
+    if not perm_check(ctx, 0):
+        return
+    count = 0
+    for mem in ctx.guild.members:
+        db_set(ctx.guild, mem, "info", "joined", str(mem.joined_at))
+        db_set(ctx.guild, mem, "info", "nick", mem.nick)
+        count += 1
+    text = "Updated %d members." % count
+    await ctx.send(text)
+
 @tasks.loop(hours=1.0)
 async def periodic():
     log(None, None, "Timed loop")
@@ -696,5 +716,54 @@ async def on_message(msg):
     """
     #print(inspect.getmembers(message))
     await bot.process_commands(msg)
+
+@bot.event
+async def on_member_join(member):
+    guild = member.guild
+    channel = config_get(guild, 'config', 'announce_channel', type='channel')
+    if not channel:
+        #print("No announce channel configured for guild %s" % guild.name)
+        return
+    name = "%s#%s" % (member.name, member.discriminator)
+    text = "%s just joined the server." % name
+    db_set(guild, member, "info", "joined", str(member.joined_at))
+    db_set(guild, member, "info", "nick", member.nick)
+    await channel.send(text)
+
+@bot.event
+async def on_member_remove(member):
+    guild = member.guild
+    channel = config_get(guild, 'config', 'announce_channel', type='channel')
+    if not channel:
+        return
+
+    name = "%s#%s" % (member.name, member.discriminator)
+    nick = db_get(guild, member, "info", "nick")
+    joined = db_get(guild, member, "info", "joined");
+    if nick:
+        text = "%s (%s) just left the server." % (nick, name)
+    else:
+        text = "%s just left the server." % (name)
+    if joined:
+        text += "\nThey joined the server on %s" % joined
+    await channel.send(text)
+
+@bot.event
+async def on_member_update(before, after):
+    guild = before.guild
+    channel = config_get(guild, 'config', 'announce_channel', type='channel')
+    text = None
+    if not channel:
+        return
+
+    if before.nick != after.nick:
+        #text = "%s changed their nick to %s" % (before.display_name, after.nick)
+        db_set(guild, after, "info", "nick", str(after.nick))
+    else:
+        #text = "%s changed something we dont care about" % after.display_name
+        pass
+
+    if text:
+        await channel.send(text)
 
 bot.run(abconfig.token)
