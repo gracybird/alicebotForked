@@ -21,7 +21,9 @@ known_config = ( ('invite_cooldown', 'interval'),
                  ('announce_channel', 'channel'),
                )
 
-bot = commands.Bot(command_prefix=abconfig.prefix)
+intents = discord.Intents.default()
+intents.members = True
+bot = commands.Bot(command_prefix=abconfig.prefix, intents=intents)
 db = dict()
 botconfig = dict()
 tl = Timeloop()
@@ -627,6 +629,7 @@ async def updateusers(ctx, *args):
     '''
     if not perm_check(ctx, 0):
         return
+
     count = 0
     for mem in ctx.guild.members:
         db_set(ctx.guild, mem, "info", "joined", str(mem.joined_at))
