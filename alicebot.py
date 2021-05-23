@@ -728,10 +728,10 @@ async def on_member_join(member):
         #print("No announce channel configured for guild %s" % guild.name)
         return
     name = "%s#%s" % (member.name, member.discriminator)
-    text = "%s just joined the server." % name
+    text = "**%s** just joined the server." % name
     db_set(guild, member, "info", "joined", str(member.joined_at))
     db_set(guild, member, "info", "nick", member.nick)
-    await channel.send(text)
+    #await channel.send(text)
 
 @bot.event
 async def on_member_remove(member):
@@ -744,9 +744,9 @@ async def on_member_remove(member):
     nick = db_get(guild, member, "info", "nick")
     joined = db_get(guild, member, "info", "joined");
     if nick:
-        text = "%s (%s) just left the server." % (nick, name)
+        text = "**%s** (%s) just left the server." % (nick, name)
     else:
-        text = "%s just left the server." % (name)
+        text = "**%s** just left the server." % (name)
     if joined:
         text += "\nThey joined the server on %s" % joined
     await channel.send(text)
