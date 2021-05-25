@@ -7,9 +7,9 @@ import re
 import discord
 from discord.ext import tasks, commands
 from tinydb import TinyDB, Query
-from timeloop import Timeloop
 from datetime import timedelta
 from datetime import datetime
+from mee6_py_api import API
 import abconfig
 
 known_config = ( ('invite_cooldown', 'interval'),
@@ -18,7 +18,8 @@ known_config = ( ('invite_cooldown', 'interval'),
                  ('autokick_timelimit', 'interval'),
                  ('autokick_reason', 'string'),
                  ('log_channel', 'channel'),
-                 ('announce_channel', 'channel'),
+                 ('announce_arrive', 'channel'),
+                 ('announce_leave', 'channel'),
                )
 
 intents = discord.Intents.default()
@@ -26,7 +27,6 @@ intents.members = True
 bot = commands.Bot(command_prefix=abconfig.prefix, intents=intents)
 db = dict()
 botconfig = dict()
-tl = Timeloop()
 
 logpath = os.path.dirname(os.path.realpath(__file__))
 
@@ -86,6 +86,39 @@ def timestr(secs):
     else:
         return "{}s".format(secs)
 
+def timespan(secs):
+    """ print a timespan as an approximation """
+    if secs > 1728000 * 2:
+        """ over two months ago """
+        months = math.floor( secs / 1728000 )
+        return "{} months".format(months)
+    elif secs > 57600 * 2:
+        days = math.floor(secs / 57600)
+        return "{} days".format(days)
+    elif secs > 3600 * 2:
+        hours = math.floor( secs / 3600 )
+        return "{} hours".format(hours)
+    elif secs >= 60 * 2:
+        mins = math.floor( secs / 60 )
+        return "{} minutes".format(mins)
+    else:
+        return "{} seconds".format(math.floor(secs))
+
+def timesince(when):
+    """ time since the given timestamp string """
+    today = datetime.utcnow()
+    event = parse_date(when)
+    diff = today - event
+    return timespan( diff.total_seconds() )
+
+def parse_date(strtime):
+    try:
+        when = datetime.strptime(strtime, '%Y-%m-%d %H:%M:%S.%f')
+        return when
+    except ValueError:
+        pass
+    return None
+
 regex = re.compile(r'^((?P<days>[\.\d]+?)d)?((?P<hours>[\.\d]+?)h)?((?P<minutes>[\.\d]+?)m)?((?P<seconds>[\.\d]+?)s)?$')
 
 def parse_interval(time_str):
@@ -129,6 +162,8 @@ def config_load(guild):
     botconfig[guild.id]['access'] = config_read(guild, 'access')
     botconfig[guild.id]['dict'] = config_read(guild, 'dict')
     botconfig[guild.id]['convert'] = config_read(guild, 'convert')
+    botconfig[guild.id]['mee6'] = API(guild.id)
+    botconfig[guild.id]['last_msg'] = dict()
 
 def config_set(guild, section, key, value):
     """
@@ -168,7 +203,7 @@ def db_get(guild, user, table, key):
     tab = db[guild.id].table(table)
     query = Query()
     res = tab.search((query.uid == user.id))
-    if res:
+    if res and key in res[0]:
         answer = res[0][key]
     else:
         answer = None
@@ -623,24 +658,62 @@ async def access(ctx, *args):
     await ctx.send(text)
 
 @bot.command()
-async def updateusers(ctx, *args):
+async def userinfo(ctx, *args):
     '''
     Forced Update of the user info db
     '''
     if not perm_check(ctx, 0):
         return
 
-    count = 0
-    for mem in ctx.guild.members:
-        db_set(ctx.guild, mem, "info", "joined", str(mem.joined_at))
-        db_set(ctx.guild, mem, "info", "nick", mem.nick)
-        count += 1
-    text = "Updated %d members." % count
-    await ctx.send(text)
+    if args and args[0] == 'update':
+        count = 0
+        for mem in ctx.guild.members:
+            db_set(ctx.guild, mem, "info", "joined", str(mem.joined_at))
+            db_set(ctx.guild, mem, "info", "nick", mem.nick)
+            count += 1
+        text = "Updated %d members." % count
+        lastmsg = {}
+        for chan in ctx.guild.channels:
+            if chan.type != discord.ChannelType.text:
+                continue
+            hist = chan.history(limit=None)
+            async for msg in hist:
+                if msg.author.id in lastmsg:
+                    if msg.created_at > lastmsg[msg.author.id]:
+                        lastmsg[msg.author.id] = msg.created_at
+                else:
+                    lastmsg[msg.author.id] = msg.created_at
+        for uid in lastmsg:
+            mem = bot.get_user(uid)
+            if mem:
+                db_set(ctx.guild, mem, "info", "lastmsg", str(lastmsg[uid]))
+        text += "\nUpdated %d users last message time." % len(lastmsg)
 
-@tasks.loop(hours=1.0)
-async def periodic():
-    log(None, None, "Timed loop")
+    elif args[0]:
+        uid = int(args[0])
+        mem = bot.get_user(uid)
+        joined = db_get(ctx.guild, mem, "info", "joined")
+        nick = db_get(ctx.guild, mem, "info", "nick")
+        lastmsg = db_get(ctx.guild, mem, "info", "lastmsg")
+        text = ">>> User: %s#%s (ID: %d)" % (mem.name, mem.discriminator, uid)
+        if joined:
+            text += "\nJoined: %s ago." % timesince(joined)
+        if nick:
+            text += "\nLast Nickname: %s" % nick
+        if lastmsg:
+            text += "\nLast message: %s ago." % timesince(lastmsg)
+        if botconfig[ctx.guild.id]['mee6']:
+            mee6API = botconfig[ctx.guild.id]['mee6']
+            level = await mee6API.levels.get_user_level(mem.id)
+            text += "\nMEE6 Level: %s" % level
+
+    await ctx.send(text)
+    #foobar
+
+@tasks.loop(minutes=60)
+async def periodic_autokick():
+    """ check for users that should be kicked """
+    log(None, None, "AutoKick Timed loop")
     today = datetime.utcnow()
     for guild in bot.guilds:
         log(guild, None, 'Guild '+guild.name+' has '+str(len(guild.members))+' members.')
@@ -666,11 +739,19 @@ async def periodic():
             else:
                 info = "The following users will be kicked if you set autokick_reason:\n"
             await channel.send(info + logtext)
+   
+@tasks.loop(minutes=2)
+async def periodic_flush():
+    """ Write out the last message log"""
+    today = datetime.utcnow()
+    for guild in bot.guilds:
+        userlist = botconfig[guild.id]['last_msg']
+        botconfig[guild.id]['last_msg'] = dict()
+        for uid, when in userlist.items():
+            mem = bot.get_user(uid)
+            if mem:
+                db_set(guild, mem, "info", "lastmsg", str(when))
 
-@periodic.before_loop
-async def before_periodic():
-#    print("Timed loop setup...")
-    pass
 
 @bot.event
 async def on_ready():
@@ -686,7 +767,8 @@ async def on_ready():
         db[ guild.id ] = TinyDB(dbpath)
         config_load(guild)
 
-    periodic.start()
+    periodic_autokick.start()
+    periodic_flush.start()
     
 @bot.event
 async def on_connect():
@@ -718,55 +800,72 @@ async def on_message(msg):
     every message on every server passes through Here
     """
     #print(inspect.getmembers(message))
+    botconfig[msg.guild.id]['last_msg'][ msg.author.id ] = msg.created_at
     await bot.process_commands(msg)
 
 @bot.event
 async def on_member_join(member):
+    """ a member arrived. announce and record it """
     guild = member.guild
-    channel = config_get(guild, 'config', 'announce_channel', type='channel')
-    if not channel:
-        #print("No announce channel configured for guild %s" % guild.name)
-        return
+    channel = config_get(guild, 'config', 'announce_arrive', type='channel')
+    last_seen = db_get(guild, member, "info", "lastseen")
     name = "%s#%s" % (member.name, member.discriminator)
-    text = "**%s** just joined the server." % name
+    if last_seen:
+        nick = db_get(guild, member, "info", "nick")
+        ago = timesince(last_seen)
+        text = ">>> **%s** just re-joined the server after %s away." % (name, ago)
+        if nick:
+            text += "\nThey were previously known as %s" % nick
+        if botconfig[guild.id]['mee6']:
+            mee6API = botconfig[guild.id]['mee6']
+            level = await mee6API.levels.get_user_level(member.id)
+            text += "\nMEE6 Level: %s" % level
+    else:
+        text = "**%s** just joined the server." % name
     db_set(guild, member, "info", "joined", str(member.joined_at))
     db_set(guild, member, "info", "nick", member.nick)
-    #await channel.send(text)
+    db_set(guild, member, "info", "lastseen", None)
+    if channel:
+        await channel.send(text)
 
 @bot.event
 async def on_member_remove(member):
+    """ a member left. announce and record it. """
     guild = member.guild
-    channel = config_get(guild, 'config', 'announce_channel', type='channel')
-    if not channel:
-        return
-
+    today = datetime.utcnow()
+    channel = config_get(guild, 'config', 'announce_leave', type='channel')
     name = "%s#%s" % (member.name, member.discriminator)
     nick = db_get(guild, member, "info", "nick")
     joined = db_get(guild, member, "info", "joined");
+    level = None
+    last_msg = db_get(guild, member, "info", "lastmsg");
+    if botconfig[guild.id]['mee6']:
+        mee6API = botconfig[guild.id]['mee6']
+        level = await mee6API.levels.get_user_level(member.id)
+
+    db_set(guild, member, "info", "lastseen", str(today))
+
+    text = ">>> "
     if nick:
-        text = "**%s** (%s) just left the server." % (nick, name)
+        text += "**%s** _(%s)_ has left the server." % (nick, name)
     else:
-        text = "**%s** just left the server." % (name)
+        text += "**%s** has left the server." % (name)
+    if level:
+        text += "\nMEE6 Level %s" % level
     if joined:
-        text += "\nThey joined the server on %s" % joined
-    await channel.send(text)
+        text += "\nThey joined the server %s ago." % timesince(joined)
+    if last_msg:
+        text += "\nTheir last message was %s ago." % timesince(last_msg)
+    text += "\nIf you are able, Please check in with them."
+
+    if channel:
+        await channel.send(text)
 
 @bot.event
 async def on_member_update(before, after):
+    """ record any change of users nick """
     guild = before.guild
-    channel = config_get(guild, 'config', 'announce_channel', type='channel')
-    text = None
-    if not channel:
-        return
-
     if before.nick != after.nick:
-        #text = "%s changed their nick to %s" % (before.display_name, after.nick)
         db_set(guild, after, "info", "nick", str(after.nick))
-    else:
-        #text = "%s changed something we dont care about" % after.display_name
-        pass
-
-    if text:
-        await channel.send(text)
 
 bot.run(abconfig.token)
