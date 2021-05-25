@@ -703,9 +703,12 @@ async def userinfo(ctx, *args):
         if lastmsg:
             text += "\nLast message: %s ago." % timesince(lastmsg)
         if botconfig[ctx.guild.id]['mee6']:
-            mee6API = botconfig[ctx.guild.id]['mee6']
-            level = await mee6API.levels.get_user_level(mem.id)
-            text += "\nMEE6 Level: %s" % level
+            try:
+                mee6API = botconfig[ctx.guild.id]['mee6']
+                level = await mee6API.levels.get_user_level(mem.id)
+                text += "\nMEE6 Level: %s" % level
+            except Exception:
+                pass
 
     await ctx.send(text)
     #foobar
@@ -817,9 +820,12 @@ async def on_member_join(member):
         if nick:
             text += "\nThey were previously known as %s" % nick
         if botconfig[guild.id]['mee6']:
-            mee6API = botconfig[guild.id]['mee6']
-            level = await mee6API.levels.get_user_level(member.id)
-            text += "\nMEE6 Level: %s" % level
+            try:
+                mee6API = botconfig[guild.id]['mee6']
+                level = await mee6API.levels.get_user_level(member.id)
+                text += "\nMEE6 Level: %s" % level
+            except Exception:
+                pass
     else:
         text = "**%s** just joined the server." % name
     db_set(guild, member, "info", "joined", str(member.joined_at))
@@ -840,8 +846,11 @@ async def on_member_remove(member):
     level = None
     last_msg = db_get(guild, member, "info", "lastmsg");
     if botconfig[guild.id]['mee6']:
-        mee6API = botconfig[guild.id]['mee6']
-        level = await mee6API.levels.get_user_level(member.id)
+        try:
+            mee6API = botconfig[guild.id]['mee6']
+            level = await mee6API.levels.get_user_level(member.id)
+        except Exception:
+            pass
 
     db_set(guild, member, "info", "lastseen", str(today))
 
