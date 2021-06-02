@@ -732,6 +732,7 @@ async def periodic_autokick():
                     if onfor > timeout:
                         logtext += " - %s expired by %s\n" % ( member.display_name, str(onfor - timeout))
                         if reason:
+                            db_set(guild, member, "info", "kicked", reason)
                             await guild.kick(member, reason=reason)
                         else:
                             #await guild.kick(member)
@@ -826,11 +827,13 @@ async def on_member_join(member):
                 text += "\nMEE6 Level: %s" % level
             except Exception:
                 pass
+        text += "\nPlease welcome them back."
     else:
-        text = "**%s** just joined the server." % name
+        text = "**%s** just joined the server, please welcome them." % name
     db_set(guild, member, "info", "joined", str(member.joined_at))
     db_set(guild, member, "info", "nick", member.nick)
     db_set(guild, member, "info", "lastseen", None)
+    db_set(guild, member, "info", "kicked", None)
     if channel:
         await channel.send(text)
 
@@ -845,6 +848,7 @@ async def on_member_remove(member):
     joined = db_get(guild, member, "info", "joined");
     level = None
     last_msg = db_get(guild, member, "info", "lastmsg");
+    reason = db_get(guild, member, "info", "kicked");
     if botconfig[guild.id]['mee6']:
         try:
             mee6API = botconfig[guild.id]['mee6']
@@ -852,6 +856,7 @@ async def on_member_remove(member):
         except Exception:
             pass
 
+    # remember that they left, so we can welcome them back
     db_set(guild, member, "info", "lastseen", str(today))
 
     text = ">>> "
@@ -865,7 +870,10 @@ async def on_member_remove(member):
         text += "\nThey joined the server %s ago." % timesince(joined)
     if last_msg:
         text += "\nTheir last message was %s ago." % timesince(last_msg)
-    text += "\nIf you are able, Please check in with them."
+    if reason:
+        text += "\nUser was kicked: %s" % reason
+    else:
+        text += "\nIf you are able, Please check in with them."
 
     if channel:
         await channel.send(text)
