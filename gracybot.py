@@ -1,279 +1,55 @@
 #!/usr/bin/env python3
 
-import os
 import time
-import math
-import re
+from classes.utils import utils.log
 import discord
 from discord.ext import tasks, commands
-from tinydb import TinyDB, Query
-from datetime import timedelta
+from tinydb import TinyDB
 from datetime import datetime
-from mee6_py_api import API
-import abconfig
+import config
+import classes.events as events
+import classes.tasks as tasks
+import classes.commands as commands
+import classes.user as user
+import classes.utils as utils
+
 
 known_config = ( ('invite_cooldown', 'interval'),
                  ('invite_timespan', 'interval'),
                  ('autokick_hasrole', 'role'),
                  ('autokick_timelimit', 'interval'),
                  ('autokick_reason', 'string'),
-                 ('log_channel', 'channel'),
+                 ('utils.log_channel', 'channel'),
                  ('announce_arrive', 'channel'),
                  ('announce_leave', 'channel'),
                )
 
 intents = discord.Intents.default()
 intents.members = True
-bot = commands.Bot(command_prefix=abconfig.prefix, intents=intents)
+bot = commands.Bot(command_prefix=config.prefix, intents=intents)
 db = dict()
 botconfig = dict()
 
-logpath = os.path.dirname(os.path.realpath(__file__))
 
-def isfloat(a):
-    """ Is the argument a floating point number"""
-    try:
-        float(a)
-        return True
-    except ValueError:
-        pass
-    return False
-
-def isexpression(a):
-    """ does the argument contain a valid expression """
-    if 'x' not in a:
-        return False
-    try:
-        res = eval(a, {'x': 1.0})
-        return True
-    except SyntaxError as err:
-        print("SyntaxError +%d: %s" % (err.offset, err.text))
-    except NameError as err:
-        print("Var not found: %s" % err)
-    #except (SyntaxError, NameError):
-    #    pass
-    return False
-
-def find_config(name):
-    """ look up a name in the known configs """
-    for config in known_config:
-        if config[0] == name:
-            return config
-    return None
-
-def has_role(member, roleid):
-    """ test for role id in members role list """
-    if any(r.id == roleid for r in member.roles):
-        return True
-    return False
-
-def timestr(secs):
-    """ print number of seconds as a human readable value """
-    if secs > 57600:
-        days = math.floor(secs / 57600)
-        secs = secs - 57600 * days
-        hours = math.floor( secs / 3600 )
-        return "{}d {}h".format(days, hours)
-    elif secs > 3600:
-        hours = math.floor( secs / 3600 )
-        secs = secs - 3600 * hours
-        mins = math.floor( secs / 60 )
-        return "{}h {}m".format(hours, mins)
-    elif secs > 60:
-        mins = math.floor( secs / 60 )
-        secs = secs - 60 * mins
-        return "{}m {}s".format(mins, secs)
-    else:
-        return "{}s".format(secs)
-
-def timespan(secs):
-    """ print a timespan as an approximation """
-    if secs > 1728000 * 2:
-        """ over two months ago """
-        months = math.floor( secs / 1728000 )
-        return "{} months".format(months)
-    elif secs > 57600 * 2:
-        days = math.floor(secs / 57600)
-        return "{} days".format(days)
-    elif secs > 3600 * 2:
-        hours = math.floor( secs / 3600 )
-        return "{} hours".format(hours)
-    elif secs >= 60 * 2:
-        mins = math.floor( secs / 60 )
-        return "{} minutes".format(mins)
-    else:
-        return "{} seconds".format(math.floor(secs))
-
-def timesince(when):
-    """ time since the given timestamp string """
-    today = datetime.utcnow()
-    event = parse_date(when)
-    diff = today - event
-    return timespan( diff.total_seconds() )
-
-def parse_date(strtime):
-    try:
-        when = datetime.strptime(strtime, '%Y-%m-%d %H:%M:%S.%f')
-        return when
-    except ValueError:
-        pass
-    return None
-
-regex = re.compile(r'^((?P<days>[\.\d]+?)d)?((?P<hours>[\.\d]+?)h)?((?P<minutes>[\.\d]+?)m)?((?P<seconds>[\.\d]+?)s)?$')
-
-def parse_interval(time_str):
-    """ parse human readable interval into a timedelta """
-    parts = regex.match(time_str)
-    if parts is None:
-        return None
-    time_params = {name: float(param) for name, param in parts.groupdict().items() if param}
-    return timedelta(**time_params)
-
-def log(guild, channel, text):
-    """ write an entry to the logfile """
-    path = logpath + '/alicebot.log'
-    if not guild:
-        gid = '-'
-    else:
-        gid = str(guild.id)
-    if not channel:
-        channel = '-'
-    when = time.strftime('%b %d %Y %H:%M:%S')
-    with open(path, 'a') as f:
-        f.write("{} {} {} {}\n".format(when, gid, channel, text))
-
-def config_read(guild, section):
-    """
-    Private function to turn a db table of config into a dict
-    """
-    tab = db[guild.id].table(section)
-    out = dict()
-    for r in tab.all():
-        out[ r['key'] ] = r['value']
-    return out
-
-def config_load(guild):
-    """
-    Reload all the configuration fr this guild
-    """
-    global botconfig
-    botconfig[guild.id] = dict()
-    botconfig[guild.id]['config'] = config_read(guild, 'config')
-    botconfig[guild.id]['access'] = config_read(guild, 'access')
-    botconfig[guild.id]['dict'] = config_read(guild, 'dict')
-    botconfig[guild.id]['convert'] = config_read(guild, 'convert')
-    botconfig[guild.id]['mee6'] = API(guild.id)
-    botconfig[guild.id]['last_msg'] = dict()
-
-def config_set(guild, section, key, value):
-    """
-    Set a single value of config then reload the dicts
-    """
-    global botconfig
-    tab = db[guild.id].table(section)
-    query = Query()
-    if not value:
-        tab.remove(query.key == key)
-    else:
-        tab.upsert({'key': key, 'value': value}, query.key == key)
-    botconfig[guild.id][section] = config_read(guild, section)
-
-def config_get(guild, section, key, type='string'):
-    """
-    fetch a single config value
-    """
-    global botconfig
-    if not guild.id in botconfig:
-        return None
-    if not section in botconfig[guild.id]:
-        return None
-    if not key in botconfig[guild.id][section]:
-        return None
-    answer = botconfig[guild.id][section][key]
-    if type == 'interval':
-        answer = parse_interval(answer)
-    elif type == 'role':
-        answer = guild.get_role(answer)
-    elif type == 'channel':
-        answer = guild.get_channel(answer)
-    return answer
-
-def db_get(guild, user, table, key):
-    """ lookup a config value for this guild """
-    tab = db[guild.id].table(table)
-    query = Query()
-    res = tab.search((query.uid == user.id))
-    if res and key in res[0]:
-        answer = res[0][key]
-    else:
-        answer = None
-    return answer
-
-def db_set(guild, user, table, key, value):
-    tab = db[guild.id].table(table)
-    query = Query()
-    tab.upsert({'uid': user.id, key: value}, query.uid == user.id)
-
-def perm_check(ctx, need):
-    answer = False
-    reason = "None"
-    
-    # is there a configured level (ignore admin only ones)
-    level = config_get(ctx.guild, "access", ctx.invoked_with)
-    if need != 0 and level:
-        need = level
-
-    # a public command
-    if not need and need != 0:
-        answer = True
-        reason = "Public"
-
-    # you were an admin anyway
-    elif ctx.author.permissions_in(ctx.channel).administrator:
-        answer = True
-        reason = "Admin"
-
-    # you have the corresponding role
-    elif has_role(ctx.author, need):
-        answer = True
-        reason = "Match"
-
-    log(ctx.guild, ctx.channel, "perm_check({},{}) = {}".format(ctx.invoked_with, need, reason))
-    return answer
-
-def convert_makekey(unit, subunit):
-    if subunit:
-        return "{}|{}".format(unit,subunit)
-    else:
-        return "{}".format(unit)
-
-def convert_splitkey(key):
-    unit = None
-    sub = None
-    if key:
-        parts = key.split('|')
-        unit = parts[0]
-        if len(parts) > 1:
-            sub = parts[1]
-    return (unit,sub)
+events.on_member_update()
 
 @bot.command()
 async def convert(ctx, *args):
     '''
     Convert values between units
     '''
-    if not perm_check(ctx, None):
+    if not user.perm_check(ctx, None):
         return
 
     response = None
     if args and args[0] == 'list':
         response = "Known conversions:\n"
-        whole = config_read(ctx.guild, 'convert')
+        whole = utils.config_read(ctx.guild, 'convert')
         count = 0
         if whole:
             whole = sorted(whole)
         for c in whole:
-            (unit, sub) = convert_splitkey(c)
+            (unit, sub) = utils.convert_splitkey(c)
             if count > 0:
                 response += ","
             response += " {}".format(unit)
@@ -286,7 +62,7 @@ async def convert(ctx, *args):
                    '   or: .convert list\n' \
                    '\n' \
                    'e.g.  .convert 30 pmol/l e2\n'
-    elif not isfloat(args[0]) and ':' not in args[0]:
+    elif not utils.isfloat(args[0]) and ':' not in args[0]:
         response = "Error: the first argument must be a value or time"
     else:
         try:
@@ -297,8 +73,8 @@ async def convert(ctx, *args):
         subunit = None
         if len(args) > 2:
             subunit = args[2].lower()
-        key = convert_makekey(baseunit, subunit)
-        item = config_get(ctx.guild, 'convert', key)
+        key = utils.convert_makekey(baseunit, subunit)
+        item = utils.config_get(ctx.guild, 'convert', key)
         if not item:
             response = "Sorry I don't know how to convert from {}".format(baseunit)
             if subunit:
@@ -306,9 +82,9 @@ async def convert(ctx, *args):
         else:
             destunit = item[0]
             factor = item[1]
-            if isfloat(factor):
+            if utils.isfloat(factor):
                 output = value * float(factor)
-            elif isexpression(factor):
+            elif utils.isexpression(factor):
                 output = eval(factor, {'x': value})
             else:
                 response = "Error in conversion factor '{}'".format(factor)
@@ -323,22 +99,22 @@ async def conversion(ctx, *args):
     '''
     Define a conversion
     '''
-    if not perm_check(ctx, None):
+    if not user.perm_check(ctx, None):
         return
 
     response = None
     if len(args)==1 and args[0] == 'list':
         response = "Known conversions:\n"
-        whole = config_read(ctx.guild, 'convert')
+        whole = utils.config_read(ctx.guild, 'convert')
         for c in whole:
             item = whole[c]
-            (unit, sub) = convert_splitkey(c)
+            (unit, sub) = utils.convert_splitkey(c)
             factor = item[1]
             if sub:
                 response += " * {} [{}]".format(unit, sub)
             else:
                 response += " * {}".format(unit)
-            if isexpression(factor):
+            if utils.isexpression(factor):
                 response += " = {} -> {}\n".format(factor, item[0])
             else:
                 response += " = x * {} -> {}\n".format(factor, item[0])
@@ -352,14 +128,14 @@ async def conversion(ctx, *args):
             subunit = None
             if len(args) > 2:
                 subunit = args[2].lower()
-            key = convert_makekey(baseunit, subunit)
+            key = utils.convert_makekey(baseunit, subunit)
             response = "conversion for {}".format(baseunit)
             if subunit:
                 response += " [{}]".format(subunit)
-            if not config_get(ctx.guild, 'convert', key):
+            if not utils.config_get(ctx.guild, 'convert', key):
                 response += " not found"
             else:
-                config_set(ctx.guild, 'convert', key, None)
+                utils.config_set(ctx.guild, 'convert', key, None)
                 response += " deleted"
 
     elif not args or args[0] == 'help' or len(args) < 3:
@@ -377,7 +153,7 @@ async def conversion(ctx, *args):
         if len(args) > 3:
             subunit = args[3].lower()
 
-        if not isfloat(factor) and not isexpression(factor):
+        if not utils.isfloat(factor) and not utils.isexpression(factor):
             response = "Factor must be a float or an expression manipulating x.  e.g. '((x-32)*5/9' instead of '%s'" % factor
         else:
             response = "Convert {}".format(baseunit)
@@ -385,8 +161,8 @@ async def conversion(ctx, *args):
                 response += " [{}]".format(subunit)
             response += " into {} with {}".format(tounit, factor)
 
-            key = convert_makekey(baseunit, subunit)
-            config_set(ctx.guild, 'convert', key, (tounit, factor, subunit))
+            key = utils.convert_makekey(baseunit, subunit)
+            utils.config_set(ctx.guild, 'convert', key, (tounit, factor, subunit))
     
     if response:
         await ctx.send(response)
@@ -397,7 +173,7 @@ async def define(ctx, *args):
     '''
     Define a word
     '''
-    if not perm_check(ctx, None):
+    if not user.perm_check(ctx, None):
         return
 
     response = None
@@ -407,17 +183,17 @@ async def define(ctx, *args):
         keyword = args[0].lower()
         rest = args[1:]
         u = ctx.author
-        c = config_get(ctx.guild, 'dict', keyword)
+        c = utils.config_get(ctx.guild, 'dict', keyword)
 
         if not rest:
             if not c:
                 response = 'No dictionary entry for "' + keyword + '"'
             else:
                 response = "Removed definition of '"+keyword+"'"
-                config_set(ctx.guild, 'dict', keyword, None)
+                utils.config_set(ctx.guild, 'dict', keyword, None)
         else:
             text = " ".join(rest)
-            config_set(ctx.guild, 'dict', keyword, text)
+            utils.config_set(ctx.guild, 'dict', keyword, text)
             response = "Defined '"+keyword+"' as '"+text+"'"
 
     if response:
@@ -428,20 +204,20 @@ async def d(ctx, *args):
     '''
     Print a word definition
     '''
-    if not perm_check(ctx, None):
+    if not user.perm_check(ctx, None):
         return
 
     response = None
     if not args or args[0] == 'help':
-        response = 'Usage: '+abconfig.prefix+'d word\nPrints the definitionof the given word.'
+        response = 'Usage: '+config.prefix+'d word\nPrints the definitionof the given word.'
     elif args[0] == 'list':
         response = "Known dictionary words: "
-        whole = config_read(ctx.guild, 'dict')
+        whole = utils.config_read(ctx.guild, 'dict')
         response += ", ".join(whole.keys())
     else:
         keyword = args[0].lower()
         u = ctx.author
-        c = config_get(ctx.guild, 'dict', keyword)
+        c = utils.config_get(ctx.guild, 'dict', keyword)
 
         if not c:
             response = 'No dictionary entry for "' + keyword + '"'
@@ -456,16 +232,16 @@ async def ping(ctx):
     '''
     Simple command to respond
     '''
-    if not perm_check(ctx, None):
+    if not user.perm_check(ctx, None):
         return
 
     u = ctx.author
-    c = db_get(ctx.guild, u, 'PingCount', 'count')
+    c = utils.db_get(ctx.guild, u, 'PingCount', 'count')
     if not c:
         c = 1
     else:
         c = c + 1
-    db_set(ctx.guild, u, 'PingCount', 'count', c)
+    utils.db_set(ctx.guild, u, 'PingCount', 'count', c)
 
     await ctx.send(u.display_name + ' you have said ping ' + str(c) + ' times')
 
@@ -474,49 +250,49 @@ async def invite(ctx):
     '''
     create a 24hour invite
     '''
-    if not perm_check(ctx, 676891619773120589):
+    if not user.perm_check(ctx, 676891619773120589):
         return
     u = ctx.author
-    mintime = config_get(ctx.guild, 'config', 'invite_cooldown', 'interval')
+    mintime = utils.config_get(ctx.guild, 'config', 'invite_cooldown', 'interval')
     if not mintime:
         mintime = 3600
     else:
         mintime = mintime.total_seconds()
 
-    timespan = config_get(ctx.guild, 'config',  'invite_timespan', 'interval')
+    timespan = utils.config_get(ctx.guild, 'config',  'invite_timespan', 'interval')
     if not timespan:
         timespan = 3600
     else:
         timespan = timespan.total_seconds()
 
-    last = db_get(ctx.guild, u, "invite", "last")
+    last = utils.db_get(ctx.guild, u, "invite", "last")
     now = int(time.time())
     if not last or last == 0 or (now - last) > mintime:
         link = await discord.TextChannel.create_invite(ctx.message.channel, max_age=timespan, max_uses=1)
-        dur = timestr(timespan)
+        dur = utils.timestr(timespan)
         await u.send('Here is an invite valid for {} {}'.format(dur, link.url))
         await ctx.send('Invite sent to '+u.display_name)
-        db_set(ctx.guild, u, "invite", "last", now)
-        log(ctx.guild, ctx.channel, "{}[{}] created an {} invite".format(ctx.author.display_name, ctx.author.id, dur))
+        utils.db_set(ctx.guild, u, "invite", "last", now)
+        utils.log(ctx.guild, ctx.channel, "{}[{}] created an {} invite".format(ctx.author.display_name, ctx.author.id, dur))
     else:
         delta = now - last
         remain = int(mintime - delta)
-        await ctx.send('Sorry '+u.display_name+', you have issued an invite too recently, please wait another '+timestr(remain))
+        await ctx.send('Sorry '+u.display_name+', you have issued an invite too recently, please wait another '+utils.timestr(remain))
 
 @bot.command()
 async def config(ctx, *args):
     '''
     Configuration commands
     '''
-    if not perm_check(ctx, 0):
+    if not user.perm_check(ctx, 0):
         return
 
     gid = ctx.guild.id
     if not args or args[0] == 'list':
-        text = "AliceBot config values :-\n"
+        text = "gracyBot config values :-\n"
         for key in known_config:
             text = text + "* " + key[0] + " = "
-            val = config_get(ctx.guild, 'config', key[0], type=key[1])
+            val = utils.config_get(ctx.guild, 'config', key[0], type=key[1])
             if not val:
                 text = text + "_Not set_\n"
             elif key[1] == 'role':
@@ -531,11 +307,11 @@ async def config(ctx, *args):
         if not args[1]:
             text = 'Usage: config get {value}'
         else:
-            key = find_config(args[1])
+            key = utils.find_config(args[1])
             if not key:
                 text = "Unknown config value '"+args[1]+"'"
             else:
-                val = config_get(ctx.guild, 'config', key[0], type=key[1])
+                val = utils.config_get(ctx.guild, 'config', key[0], type=key[1])
                 if not val:
                     text = "No config set for '"+key[0]+"'"
                 elif key[1] == 'role':
@@ -547,10 +323,10 @@ async def config(ctx, *args):
     elif args[0] == 'set':
         if not args[1] or not args[2]:
             text = "Usage: config set key value"
-        elif not find_config(args[1]):
+        elif not utils.find_config(args[1]):
             text = "Unknown config setting %s" % (args[1])
         else:
-            key = find_config(args[1])
+            key = utils.find_config(args[1])
             value = args[2]
             if key[1] == 'role':
                 if ctx.message.role_mentions:
@@ -560,7 +336,7 @@ async def config(ctx, *args):
                 if not role:
                     text = "Could not find a role matching %s" % (value)
                 else:
-                    config_set(ctx.guild, 'config', key[0], role.id)
+                    utils.config_set(ctx.guild, 'config', key[0], role.id)
                     text = "Set config %s = %d (%s)" % (key[0], role.id, role.name)
             elif key[1] == 'channel':
                 if ctx.message.channel_mentions:
@@ -570,22 +346,22 @@ async def config(ctx, *args):
                 if not channel:
                     text = "Could not find channel matching %s" % (value)
                 else:
-                    config_set(ctx.guild, 'config', key[0], channel.id)
+                    utils.config_set(ctx.guild, 'config', key[0], channel.id)
                     text = "Set config %s = %d (%s)" % (key[0], channel.id, channel.name)
 
             else:
-                config_set(ctx.guild, 'config', key[0], value)
+                utils.config_set(ctx.guild, 'config', key[0], value)
                 text = "Set config %s = %s" % (key[0], value)
-            log(ctx.guild, ctx.channel, "User {}[{}] just set config {}={}".format(ctx.author.display_name, ctx.author.id, key[0], value))
+            utils.log(ctx.guild, ctx.channel, "User {}[{}] just set config {}={}".format(ctx.author.display_name, ctx.author.id, key[0], value))
     elif args[0] == 'unset':
         if not args[1]:
             text = 'Usage: config unset {key}'
         else:
-            key = find_config(args[1])
+            key = utils.find_config(args[1])
             if not key:
                 text = "Unknown config value '"+args[1]+"'"
             else:
-                val = config_set(ctx.guild, 'config', key[0], None)
+                val = utils.config_set(ctx.guild, 'config', key[0], None)
                 text = "Removed config value for '"+key[0]+"'"
     else:
         text = "Unrecognised operation " + args[0]
@@ -596,7 +372,7 @@ async def access(ctx, *args):
     '''
     Access control to commands
     '''
-    if not perm_check(ctx, 0):
+    if not user.perm_check(ctx, 0):
         return
 
     if not args or args[0] == 'list':
@@ -606,7 +382,7 @@ async def access(ctx, *args):
         text += "Command access permissions :-\n"
         for cmd in bot.commands:
             text = text + " * {} - ".format(cmd.name)
-            val = config_get(ctx.guild, 'access', cmd.name)
+            val = utils.config_get(ctx.guild, 'access', cmd.name)
             if cmd.name in ('config','access'):
                 text = text + 'Admin only (not configurable)'
             elif not val:
@@ -638,9 +414,9 @@ async def access(ctx, *args):
             if not role:
                 text = "Please mention a role"
             else:
-                config_set(ctx.guild, 'access', cmd.name, role.id)
+                utils.config_set(ctx.guild, 'access', cmd.name, role.id)
                 text = "Restricting {} command to @{} [id:{}]".format(cmd.name, role.name, role.id)
-                log(ctx.guild, ctx.channel, "User {}[{}] restricted {} to {}[{}]".format(ctx.author.display_name, ctx.author.id, cmd.name, role.name, role.id))
+                utils.log(ctx.guild, ctx.channel, "User {}[{}] restricted {} to {}[{}]".format(ctx.author.display_name, ctx.author.id, cmd.name, role.name, role.id))
     elif args[0] == 'unset':
         cmd = None
         for c in bot.commands:
@@ -649,9 +425,9 @@ async def access(ctx, *args):
         if not cmd:
             text = "Could not find command '{}'".format(args[1])
         else:
-            config_set(ctx.guild, "access", cmd.name, None)
+            utils.config_set(ctx.guild, "access", cmd.name, None)
             text = "Removing restriction on command {}".format(cmd.name)
-            log(ctx.guild, ctx.channel, "User {}[{}] unrestricted {}".format(ctx.author.display_name, ctx.author.id, cmd.name))
+            utils.log(ctx.guild, ctx.channel, "User {}[{}] unrestricted {}".format(ctx.author.display_name, ctx.author.id, cmd.name))
     else:
         text = "Unrecognised operation " + args[0]
 
@@ -662,14 +438,14 @@ async def userinfo(ctx, *args):
     '''
     Forced Update of the user info db
     '''
-    if not perm_check(ctx, 0):
+    if not user.perm_check(ctx, 0):
         return
 
     if args and args[0] == 'update':
         count = 0
         for mem in ctx.guild.members:
-            db_set(ctx.guild, mem, "info", "joined", str(mem.joined_at))
-            db_set(ctx.guild, mem, "info", "nick", mem.nick)
+            utils.db_set(ctx.guild, mem, "info", "joined", str(mem.joined_at))
+            utils.db_set(ctx.guild, mem, "info", "nick", mem.nick)
             count += 1
         text = "Updated %d members." % count
         lastmsg = {}
@@ -686,22 +462,22 @@ async def userinfo(ctx, *args):
         for uid in lastmsg:
             mem = bot.get_user(uid)
             if mem:
-                db_set(ctx.guild, mem, "info", "lastmsg", str(lastmsg[uid]))
+                utils.db_set(ctx.guild, mem, "info", "lastmsg", str(lastmsg[uid]))
         text += "\nUpdated %d users last message time." % len(lastmsg)
 
     elif args[0]:
         uid = int(args[0])
         mem = bot.get_user(uid)
-        joined = db_get(ctx.guild, mem, "info", "joined")
-        nick = db_get(ctx.guild, mem, "info", "nick")
-        lastmsg = db_get(ctx.guild, mem, "info", "lastmsg")
+        joined = utils.db_get(ctx.guild, mem, "info", "joined")
+        nick = utils.db_get(ctx.guild, mem, "info", "nick")
+        lastmsg = utils.db_get(ctx.guild, mem, "info", "lastmsg")
         text = ">>> User: %s#%s (ID: %d)" % (mem.name, mem.discriminator, uid)
         if joined:
-            text += "\nJoined: %s ago." % timesince(joined)
+            text += "\nJoined: %s ago." % utils.timesince(joined)
         if nick:
             text += "\nLast Nickname: %s" % nick
         if lastmsg:
-            text += "\nLast message: %s ago." % timesince(lastmsg)
+            text += "\nLast message: %s ago." % utils.timesince(lastmsg)
         if botconfig[ctx.guild.id]['mee6']:
             try:
                 mee6API = botconfig[ctx.guild.id]['mee6']
@@ -716,37 +492,37 @@ async def userinfo(ctx, *args):
 @tasks.loop(minutes=60)
 async def periodic_autokick():
     """ check for users that should be kicked """
-    log(None, None, "AutoKick Timed loop")
+    utils.log(None, None, "AutoKick Timed loop")
     today = datetime.utcnow()
     for guild in bot.guilds:
-        log(guild, None, 'Guild '+guild.name+' has '+str(len(guild.members))+' members.')
-        wantrole = config_get(guild, 'config', 'autokick_hasrole' )
-        timeout = config_get(guild, 'config', 'autokick_timelimit', type='interval')
-        reason = config_get(guild, 'config', 'autokick_reason')
-        channel = config_get(guild, 'config', 'log_channel', type='channel')
-        logtext = str()
+        utils.log(guild, None, 'Guild '+guild.name+' has '+str(len(guild.members))+' members.')
+        wantrole = utils.config_get(guild, 'config', 'autokick_hasrole' )
+        timeout = utils.config_get(guild, 'config', 'autokick_timelimit', type='interval')
+        reason = utils.config_get(guild, 'config', 'autokick_reason')
+        channel = utils.config_get(guild, 'config', 'utils.log_channel', type='channel')
+        utils.logtext = str()
         if wantrole and timeout:
             for member in guild.members:
-                if has_role(member, wantrole):
+                if user.has_role(member, wantrole):
                     onfor = today - member.joined_at
                     if onfor > timeout:
-                        logtext += " - %s expired by %s\n" % ( member.display_name, str(onfor - timeout))
+                        utils.logtext += " - %s expired by %s\n" % ( member.display_name, str(onfor - timeout))
                         if reason:
-                            db_set(guild, member, "info", "kicked", reason)
+                            utils.db_set(guild, member, "info", "kicked", reason)
                             await guild.kick(member, reason=reason)
                         else:
                             #await guild.kick(member)
                             pass
-        if logtext and channel:
+        if utils.logtext and channel:
             if reason:
                 info = "The following users have been autokicked :-\n"
             else:
                 info = "The following users will be kicked if you set autokick_reason:\n"
-            await channel.send(info + logtext)
+            await channel.send(info + utils.logtext)
    
 @tasks.loop(minutes=2)
 async def periodic_flush():
-    """ Write out the last message log"""
+    """ Write out the last message utils.log"""
     today = datetime.utcnow()
     for guild in bot.guilds:
         userlist = botconfig[guild.id]['last_msg']
@@ -754,7 +530,7 @@ async def periodic_flush():
         for uid, when in userlist.items():
             mem = bot.get_user(uid)
             if mem:
-                db_set(guild, mem, "info", "lastmsg", str(when))
+                utils.db_set(guild, mem, "info", "lastmsg", str(when))
 
 
 @bot.event
@@ -764,12 +540,12 @@ async def on_ready():
     and has received a list of all the guilds.
     open up a db for each one
     """
-    log(None, None, "Bot ready")
+    utils.log(None, None, "Bot ready")
     for guild in bot.guilds:
-        log(None, None, 'guild: ' + guild.name + ' (' + str(guild.id) + ')')
-        dbpath = abconfig.db_prefix + str(guild.id) + '.json'
+        utils.log(None, None, 'guild: ' + guild.name + ' (' + str(guild.id) + ')')
+        dbpath = config.db_prefix + str(guild.id) + '.json'
         db[ guild.id ] = TinyDB(dbpath)
-        config_load(guild)
+        utils.config_load(guild)
 
     periodic_autokick.start()
     periodic_flush.start()
@@ -779,24 +555,24 @@ async def on_connect():
     """
     connected to discord, but not necessarily ready to run yet
     """
-    log(None, None, "Bot connected")
+    utils.log(None, None, "Bot connected")
 
 @bot.event
 async def on_guild_join(guild):
     """
     We just joined a server
     """
-    log(guild, None, "Joined server " + guild.name)
-    dbpath = abconfig.db_prefix + str(guild.id) + '.json'
+    utils.log(guild, None, "Joined server " + guild.name)
+    dbpath = config.db_prefix + str(guild.id) + '.json'
     db[ guild.id ] = TinyDB(dbpath)
-    config_load(guild)
+    utils.config_load(guild)
 
 @bot.event
 async def on_guild_remove(guild):
     """
     We just left a server
     """
-    log(guild, None, "Left server " + guild.name)
+    utils.log(guild, None, "Left server " + guild.name)
 
 @bot.event
 async def on_message(msg):
@@ -811,12 +587,12 @@ async def on_message(msg):
 async def on_member_join(member):
     """ a member arrived. announce and record it """
     guild = member.guild
-    channel = config_get(guild, 'config', 'announce_arrive', type='channel')
-    last_seen = db_get(guild, member, "info", "lastseen")
+    channel = utils.config_get(guild, 'config', 'announce_arrive', type='channel')
+    last_seen = utils.db_get(guild, member, "info", "lastseen")
     name = "%s#%s" % (member.name, member.discriminator)
     if last_seen:
-        nick = db_get(guild, member, "info", "nick")
-        ago = timesince(last_seen)
+        nick = utils.db_get(guild, member, "info", "nick")
+        ago = utils.timesince(last_seen)
         text = ">>> **%s** just re-joined the server after %s away." % (name, ago)
         if nick:
             text += "\nThey were previously known as %s" % nick
@@ -830,10 +606,10 @@ async def on_member_join(member):
         text += "\nPlease welcome them back."
     else:
         text = "**%s** just joined the server, please welcome them." % name
-    db_set(guild, member, "info", "joined", str(member.joined_at))
-    db_set(guild, member, "info", "nick", member.nick)
-    db_set(guild, member, "info", "lastseen", None)
-    db_set(guild, member, "info", "kicked", None)
+    utils.db_set(guild, member, "info", "joined", str(member.joined_at))
+    utils.db_set(guild, member, "info", "nick", member.nick)
+    utils.db_set(guild, member, "info", "lastseen", None)
+    utils.db_set(guild, member, "info", "kicked", None)
     if channel:
         await channel.send(text)
 
@@ -842,13 +618,13 @@ async def on_member_remove(member):
     """ a member left. announce and record it. """
     guild = member.guild
     today = datetime.utcnow()
-    channel = config_get(guild, 'config', 'announce_leave', type='channel')
+    channel = utils.config_get(guild, 'config', 'announce_leave', type='channel')
     name = "%s#%s" % (member.name, member.discriminator)
-    nick = db_get(guild, member, "info", "nick")
-    joined = db_get(guild, member, "info", "joined");
+    nick = utils.db_get(guild, member, "info", "nick")
+    joined = utils.db_get(guild, member, "info", "joined");
     level = None
-    last_msg = db_get(guild, member, "info", "lastmsg");
-    reason = db_get(guild, member, "info", "kicked");
+    last_msg = utils.db_get(guild, member, "info", "lastmsg");
+    reason = utils.db_get(guild, member, "info", "kicked");
     if botconfig[guild.id]['mee6']:
         try:
             mee6API = botconfig[guild.id]['mee6']
@@ -857,7 +633,7 @@ async def on_member_remove(member):
             pass
 
     # remember that they left, so we can welcome them back
-    db_set(guild, member, "info", "lastseen", str(today))
+    utils.db_set(guild, member, "info", "lastseen", str(today))
 
     text = ">>> "
     if nick:
@@ -867,9 +643,9 @@ async def on_member_remove(member):
     if level:
         text += "\nMEE6 Level %s" % level
     if joined:
-        text += "\nThey joined the server %s ago." % timesince(joined)
+        text += "\nThey joined the server %s ago." % utils.timesince(joined)
     if last_msg:
-        text += "\nTheir last message was %s ago." % timesince(last_msg)
+        text += "\nTheir last message was %s ago." % utils.timesince(last_msg)
     if reason:
         text += "\nUser was kicked: %s" % reason
     else:
@@ -878,11 +654,4 @@ async def on_member_remove(member):
     if channel:
         await channel.send(text)
 
-@bot.event
-async def on_member_update(before, after):
-    """ record any change of users nick """
-    guild = before.guild
-    if before.nick != after.nick:
-        db_set(guild, after, "info", "nick", str(after.nick))
-
-bot.run(abconfig.token)
+bot.run(config.token)
