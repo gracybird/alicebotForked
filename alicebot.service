@@ -1,0 +1,14 @@
+[Unit]
+Description=AliceBot Discord Bot Service
+After=multi-user.target
+Conflicts=getty@tty1.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /home/ubuntu/bots/alicebot/alicebot.py
+StandardInput=tty-force
+WorkingDirectory=/home/ubuntu/bots/alicebot
+
+
+[Install]
+WantedBy=multi-user.target

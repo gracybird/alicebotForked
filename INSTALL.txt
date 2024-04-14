@@ -1,0 +1,15 @@
+Setup:
+https://github.com/GreatTaku/Discord-Bot-Examples/blob/master/README.rst
+
+
+Requirements:
+
+pip3 install --user discord.py tinydb timeloop
+
+
+Copy the systemd service file:
+$ cp alicebot.service /lib/systemd/system/alicebot.service
+$ systemctl daemon-reload
+$ systemctl enable alicebot.service
+$ systemctl start alicebot.service
+
