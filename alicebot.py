@@ -51,8 +51,6 @@ def isexpression(a):
         print("SyntaxError +%d: %s" % (err.offset, err.text))
     except NameError as err:
         print("Var not found: %s" % err)
-    #except (SyntaxError, NameError):
-    #    pass
     return False
 
 def find_config(name):
@@ -343,8 +341,6 @@ async def conversion(ctx, *args):
                 response += " = {} -> {}\n".format(factor, item[0])
             else:
                 response += " = x * {} -> {}\n".format(factor, item[0])
-
-
     elif args and args[0] == 'remove':
         if len(args) < 2:
             response = "Usage: .convert remove {fromunit} [subunit]"
@@ -362,7 +358,6 @@ async def conversion(ctx, *args):
             else:
                 config_set(ctx.guild, 'convert', key, None)
                 response += " deleted"
-
     elif not args or args[0] == 'help' or len(args) < 3:
         response = 'Usage: .conversion {fromunit} {factor/formula} {tounit} [subunit]\n' \
                    '   or: .conversion list\n' \
@@ -658,141 +653,137 @@ async def access(ctx, *args):
 
     await ctx.send(text)
 
-# @bot.command()
-# @commands.has_any_role('Greeters', 'Moderators', 'Admins')
-# async def member(ctx, member: discord.Member):
-#    await membersilent(ctx, member)
+@bot.command()
+@commands.has_any_role('Greeters', 'Moderators', 'Admins')
+async def member(ctx, member: discord.Member):
+    await membersilent(ctx, member)
 
-    # Also send a message to #introductions informing the community of this new user.
-#    intros_channel = ctx.guild.get_channel(INTROS_CHANNEL_ID) or await ctx.guild.fetch_channel(INTROS_CHANNEL_ID)
-#    await intros_channel.send(f"Welcome, {member.mention}! Please introduce yourself! What's your favorite food? What movies or shows have you enjoyed recently? Is pineapple a pizza topping? Is a hot dog a sandwich? And other questions in the pins for this channel if you need some inspiration.")
+    #Also send a message to #introductions informing the community of this new user.
+    intros_channel = ctx.guild.get_channel(INTROS_CHANNEL_ID) or await ctx.guild.fetch_channel(INTROS_CHANNEL_ID)
+    await intros_channel.send(f"Welcome, {member.mention}! Please introduce yourself! What's your favorite food? What movies or shows have you enjoyed recently? Is pineapple a pizza topping? Is a hot dog a sandwich? And other questions in the pins for this channel if you need some inspiration.")
 
-# @bot.command()
-# @commands.has_any_role('Greeters', 'Moderators', 'Admins')
-# async def membersilent(ctx, member: discord.Member):
+@bot.command()
+@commands.has_any_role('Greeters', 'Moderators', 'Admins')
+async def membersilent(ctx, member: discord.Member):
     # Get the role object for the "member" role
-#    role = discord.utils.get(ctx.guild.roles, name="member")
+    role = discord.utils.get(ctx.guild.roles, name="member")
 
     # Add the "member" role to the member object
-#    await member.add_roles(role)
+    await member.add_roles(role)
 
     # Send a message confirming that the member has been granted the "member" role
-    #await ctx.send(f"{member.mention} has been granted the 'member' role! Please use <#630312311789191188> to complete your profile (note: your pronoun selection will open gendered chat spaces)")
-    #await ctx.send(f"Welcome {member.mention}, you are now a member of TransLater! You may now click the reactions in <#630312311789191188> and <#1227053053471887371> to assign roles to yourself. They are organized in categories explaining what they are for; selecting one or more gender identity roles will unlock gender-specific channels.")
-#    await ctx.send(f"Welcome {member.mention}, you are now a member of TransLater! We look forward to getting to know you!\n\nYou may now click the reactions in <#1227053053471887371> to open access to different channels or receive alerts for different community activities. For example, selecting one or more gender identity roles will unlock gender-specific channels.\n\nIf you haven't already, please review our <#628881740194250774>, and you can select vanity roles in <#630312311789191188> for your community profile. You can also add your pronouns to your Discord profile, either for Discord as a whole or just for TransLater. Find out more here: https://discord.com/channels/481113082005946368/1227159893577043990")
+    await ctx.send(f"{member.mention} has been granted the 'member' role! Please use <#630312311789191188> to complete your profile (note: your pronoun selection will open gendered chat spaces)")
+    await ctx.send(f"Welcome {member.mention}, you are now a member of TransLater! You may now click the reactions in <#630312311789191188> and <#1227053053471887371> to assign roles to yourself. They are organized in categories explaining what they are for; selecting one or more gender identity roles will unlock gender-specific channels.")
+    await ctx.send(f"Welcome {member.mention}, you are now a member of TransLater! We look forward to getting to know you!\n\nYou may now click the reactions in <#1227053053471887371> to open access to different channels or receive alerts for different community activities. For example, selecting one or more gender identity roles will unlock gender-specific channels.\n\nIf you haven't already, please review our <#628881740194250774>, and you can select vanity roles in <#630312311789191188> for your community profile. You can also add your pronouns to your Discord profile, either for Discord as a whole or just for TransLater. Find out more here: https://discord.com/channels/481113082005946368/1227159893577043990")
 
-# @member.error
-# async def member_error(ctx, error):
-    # if isinstance(error, commands.BadArgument):
-    #     try:
-    #         member = await commands.MemberConverter().convert(ctx, ctx.message.content.split()[1])
-    #     except commands.errors.MemberNotFound:
-    #         await ctx.send("Invalid member provided. Please specify a valid user ID or username (with or without discriminator).")
-    #         return
-    #     await member.add_roles(discord.utils.get(ctx.guild.roles, name="member"))
-    #     await ctx.send(f"{member.mention} has been granted the 'member' role!")
-    # elif isinstance(error, commands.MissingAnyRole):
-    #     await ctx.send("You do not have permission to use this command.")
+@member.error
+async def member_error(ctx, error):
+    if isinstance(error, commands.BadArgument):
+        try:
+            member = await commands.MemberConverter().convert(ctx, ctx.message.content.split()[1])
+        except commands.errors.MemberNotFound:
+            await ctx.send("Invalid member provided. Please specify a valid user ID or username (with or without discriminator).")
+            return
+        await member.add_roles(discord.utils.get(ctx.guild.roles, name="member"))
+        await ctx.send(f"{member.mention} has been granted the 'member' role!")
+    elif isinstance(error, commands.MissingAnyRole):
+        await ctx.send("You do not have permission to use this command.")
 
-# @bot.command()
-# async def userinfo(ctx, *args):
-#     '''
-#     Forced Update of the user info db
-#     '''
-#     if not perm_check(ctx, 0):
-#         return
+@bot.command()
+async def userinfo(ctx, *args):
+    '''
+    Forced Update of the user info db
+    '''
+    if not perm_check(ctx, 0):
+        return
 
-#     if args and args[0] == 'update':
-#         count = 0
-#         for mem in ctx.guild.members:
-#             db_set(ctx.guild, mem, "info", "joined", str(mem.joined_at))
-#             db_set(ctx.guild, mem, "info", "nick", mem.nick)
-#             count += 1
-#         text = "Updated %d members." % count
-#         lastmsg = {}
-#         for chan in ctx.guild.channels:
-#             if chan.type != discord.ChannelType.text:
-#                 continue
-#             hist = chan.history(limit=None)
-#             async for msg in hist:
-#                 if msg.author.id in lastmsg:
-#                     if msg.created_at > lastmsg[msg.author.id]:
-#                         lastmsg[msg.author.id] = msg.created_at
-#                 else:
-#                     lastmsg[msg.author.id] = msg.created_at
-#         for uid in lastmsg:
-#             mem = bot.get_user(uid)
-#             if mem:
-#                 db_set(ctx.guild, mem, "info", "lastmsg", str(lastmsg[uid]))
-#         text += "\nUpdated %d users last message time." % len(lastmsg)
+    if args and args[0] == 'update':
+        count = 0
+        for mem in ctx.guild.members:
+            db_set(ctx.guild, mem, "info", "joined", str(mem.joined_at))
+            db_set(ctx.guild, mem, "info", "nick", mem.nick)
+            count += 1
+        text = "Updated %d members." % count
+        lastmsg = {}
+        for chan in ctx.guild.channels:
+            if chan.type != discord.ChannelType.text:
+                continue
+            hist = chan.history(limit=None)
+            async for msg in hist:
+                if msg.author.id in lastmsg:
+                    if msg.created_at > lastmsg[msg.author.id]:
+                        lastmsg[msg.author.id] = msg.created_at
+                else:
+                    lastmsg[msg.author.id] = msg.created_at
+        for uid in lastmsg:
+            mem = bot.get_user(uid)
+            if mem:
+                db_set(ctx.guild, mem, "info", "lastmsg", str(lastmsg[uid]))
+        text += "\nUpdated %d users last message time." % len(lastmsg)
+    elif args[0]:
+        uid = int(args[0])
+        mem = bot.get_user(uid)
+        joined = db_get(ctx.guild, mem, "info", "joined")
+        nick = db_get(ctx.guild, mem, "info", "nick")
+        lastmsg = db_get(ctx.guild, mem, "info", "lastmsg")
+        text = ">>> User: %s#%s (ID: %d)" % (mem.name, mem.discriminator, uid)
+        if joined:
+            text += "\nJoined: %s ago." % timesince(joined)
+        if nick:
+            text += "\nLast Nickname: %s" % nick
+        if lastmsg:
+            text += "\nLast message: %s ago." % timesince(lastmsg)
+        if botconfig[ctx.guild.id]['mee6']:
+            try:
+                mee6API = botconfig[ctx.guild.id]['mee6']
+                level = await mee6API.levels.get_user_level(mem.id)
+                text += "\nMEE6 Level: %s" % level
+            except Exception:
+                pass
+    await ctx.send(text)
 
-#     elif args[0]:
-#         uid = int(args[0])
-#         mem = bot.get_user(uid)
-#         joined = db_get(ctx.guild, mem, "info", "joined")
-#         nick = db_get(ctx.guild, mem, "info", "nick")
-#         lastmsg = db_get(ctx.guild, mem, "info", "lastmsg")
-#         text = ">>> User: %s#%s (ID: %d)" % (mem.name, mem.discriminator, uid)
-#         if joined:
-#             text += "\nJoined: %s ago." % timesince(joined)
-#         if nick:
-#             text += "\nLast Nickname: %s" % nick
-#         if lastmsg:
-#             text += "\nLast message: %s ago." % timesince(lastmsg)
-#         if botconfig[ctx.guild.id]['mee6']:
-#             try:
-#                 mee6API = botconfig[ctx.guild.id]['mee6']
-#                 level = await mee6API.levels.get_user_level(mem.id)
-#                 text += "\nMEE6 Level: %s" % level
-#             except Exception:
-#                 pass
-
-#     await ctx.send(text)
-#     #foobar
-
-# @tasks.loop(minutes=60)
-# async def periodic_autokick():
-#     """ check for users that should be kicked """
-#     log(None, None, "AutoKick Timed loop")
-#     today = datetime.utcnow()
-#     for guild in bot.guilds:
-#         log(guild, None, 'Guild '+guild.name+' has '+str(len(guild.members))+' members.')
-#         wantrole = config_get(guild, 'config', 'autokick_hasrole' )
-#         timeout = config_get(guild, 'config', 'autokick_timelimit', type='interval')
-#         reason = config_get(guild, 'config', 'autokick_reason')
-#         channel = config_get(guild, 'config', 'log_channel', type='channel')
-#         logtext = str()
-#         if wantrole and timeout:
-#             for member in guild.members:
-#                 if has_role(member, wantrole):
-#                     onfor = today - member.joined_at
-#                     if onfor > timeout:
-#                         logtext += " - %s expired by %s\n" % ( member.display_name, str(onfor - timeout))
-#                         if reason:
-#                             db_set(guild, member, "info", "kicked", reason)
-#                             await guild.kick(member, reason=reason)
-#                         else:
-#                             #await guild.kick(member)
-#                             pass
-#         if logtext and channel:
-#             if reason:
-#                 info = "The following users have been autokicked :-\n"
-#             else:
-#                 info = "The following users will be kicked if you set autokick_reason:\n"
-#             await channel.send(info + logtext)
+@tasks.loop(minutes=60)
+async def periodic_autokick():
+    """ check for users that should be kicked """
+    log(None, None, "AutoKick Timed loop")
+    today = datetime.utcnow()
+    for guild in bot.guilds:
+        log(guild, None, 'Guild '+guild.name+' has '+str(len(guild.members))+' members.')
+        wantrole = config_get(guild, 'config', 'autokick_hasrole' )
+        timeout = config_get(guild, 'config', 'autokick_timelimit', type='interval')
+        reason = config_get(guild, 'config', 'autokick_reason')
+        channel = config_get(guild, 'config', 'log_channel', type='channel')
+        logtext = str()
+        if wantrole and timeout:
+            for member in guild.members:
+                if has_role(member, wantrole):
+                    onfor = today - member.joined_at
+                    if onfor > timeout:
+                        logtext += " - %s expired by %s\n" % ( member.display_name, str(onfor - timeout))
+                        if reason:
+                            db_set(guild, member, "info", "kicked", reason)
+                            await guild.kick(member, reason=reason)
+                        else:
+                            #await guild.kick(member)
+                            pass
+        if logtext and channel:
+            if reason:
+                info = "The following users have been autokicked :-\n"
+            else:
+                info = "The following users will be kicked if you set autokick_reason:\n"
+            await channel.send(info + logtext)
    
-# @tasks.loop(minutes=2)
-# async def periodic_flush():
-#     """ Write out the last message log"""
-#     today = datetime.utcnow()
-#     for guild in bot.guilds:
-#         userlist = botconfig[guild.id]['last_msg']
-#         botconfig[guild.id]['last_msg'] = dict()
-#         for uid, when in userlist.items():
-#             mem = bot.get_user(uid)
-#             if mem:
-#                 db_set(guild, mem, "info", "lastmsg", str(when))
-
+@tasks.loop(minutes=2)
+async def periodic_flush():
+    """ Write out the last message log"""
+    today = datetime.utcnow()
+    for guild in bot.guilds:
+        userlist = botconfig[guild.id]['last_msg']
+        botconfig[guild.id]['last_msg'] = dict()
+        for uid, when in userlist.items():
+            mem = bot.get_user(uid)
+            if mem:
+                db_set(guild, mem, "info", "lastmsg", str(when))
 
 @bot.event
 async def on_ready():
@@ -808,8 +799,8 @@ async def on_ready():
         db[ guild.id ] = TinyDB(dbpath)
         config_load(guild)
 
-    # periodic_autokick.start()
-    # periodic_flush.start()
+    periodic_autokick.start()
+    periodic_flush.start()
     
 @bot.event
 async def on_connect():
